@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 模型与训练产物
+models/
+logs/
+*.pt
+
+# 测试临时产物
+tests/_artifacts/
+
+# 虚拟环境
+.venv/
+venv/

@@ -1,0 +1,41 @@
+device: auto            # auto | cpu | cuda | cuda:1 | mps
+seed: 0
+num_threads: 8
+
+board:
+  size: 15              # 棋盘边长：9 / 13 / 15 / 19 ...（网络、编码、回放池自动适配）
+
+paths:
+  models: models
+  logs: logs
+
+net:
+  channels: 32
+  blocks: 3
+
+mcts:
+  sims_play: 400
+  sims_train: 150
+  c_puct: 1.5
+  root_noise: true
+  dir_alpha: 0.3
+  dir_eps: 0.25
+  temp_moves: 15
+  temp: 1.0
+
+train:
+  iterations: 50
+  games_per_iter: 20
+  batch_size: 128
+  updates_per_iter: 50
+  lr: 0.002
+  weight_decay: 0.0001
+  c_policy: 1.0
+  lambda_vbar: 0.2
+  replay_capacity: 200000
+  eval_every: 100
+  eval_games: 20
+  opponents:
+    self: 0.6
+    heuristic: 0.3
+    random: 0.1
