@@ -1,6 +1,7 @@
 device: auto            # auto | cpu | cuda | cuda:1 | mps
 seed: 0
-num_threads: 8
+num_threads: 8           # torch/BLAS 线程数：0=全部逻辑核，N=指定 N，负数=不干预
+                         # 注意：CPU 训练时调大有效；GPU 训练时收益有限（MCTS 树遍历是单线程 Python）
 
 board:
   size: 15              # 棋盘边长：9 / 13 / 15 / 19 ...（网络、编码、回放池自动适配）

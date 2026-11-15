@@ -138,13 +138,27 @@ def resolve_device(spec: Optional[str] = None) -> str:
 
 
 def configure_threads(cfg: Dict[str, Any]):
-    """设置 torch 线程数（尽力而为）。"""
+    """设置 torch / 底层数学库线程数（尽力而为）。
+
+    num_threads 取值：
+      > 0   使用该线程数
+      = 0   使用全部逻辑核（os.cpu_count()）
+      < 0   不干预（沿用 torch 默认）
+    """
     torch = _torch()
     if torch is None:
         return
     n = int(cfg.get("num_threads") or 0)
-    if n > 0:
-        torch.set_num_threads(n)
+    if n < 0:
+        return
+    if n == 0:
+        n = os.cpu_count() or 0
+    if n <= 0:
+        return
+    torch.set_num_threads(n)
+    # 让底层 BLAS（MKL/OpenMP）也用一致的线程数；必须在第一次矩阵运算之前设置
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ.setdefault(var, str(n))
 
 
 def doctor_report(cfg: Dict[str, Any], config_source: str = "") -> str:
@@ -154,6 +168,7 @@ def doctor_report(cfg: Dict[str, Any], config_source: str = "") -> str:
     lines = ["=== 环境自检 ==="]
     lines.append(f"python      : {sys.version.split()[0]} ({platform.machine()})")
     lines.append(f"工作目录    : {Path.cwd()}")
+    lines.append(f"逻辑核数     : {os.cpu_count()}")
     torch = _torch()
     if torch is None:
         lines.append("torch       : 未安装（无模型路径不可用，启发式/MCTS 仍可运行）")
@@ -166,7 +181,10 @@ def doctor_report(cfg: Dict[str, Any], config_source: str = "") -> str:
             for i in range(torch.cuda.device_count()):
                 lines.append(f"  [{i}] {torch.cuda.get_device_name(i)}")
         lines.append(f"cuda 构建    : {torch.version.cuda}")
-        lines.append(f"torch 线程数 : {torch.get_num_threads()}")
+        lines.append(f"torch 线程数 : {torch.get_num_threads()}（当前进程默认值，训练会按配置重设）")
+    lines.append(
+        f"num_threads  : {cfg.get('num_threads')}（配置值；0=全部逻辑核，<0=不干预）"
+    )
     spec = device_spec(cfg.get("device", "auto"))
     try:
         resolved = resolve_device(spec)
