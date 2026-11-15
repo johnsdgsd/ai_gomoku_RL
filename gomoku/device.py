@@ -40,6 +40,8 @@ DEFAULTS: Dict[str, Any] = {
         "replay_capacity": 200000,
         "eval_every": 100,
         "eval_games": 20,
+        "save_every_iters": 5,
+        "keep_checkpoints": 5,
         "opponents": {"self": 0.6, "heuristic": 0.3, "random": 0.1},
     },
 }

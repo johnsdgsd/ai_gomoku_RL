@@ -63,6 +63,8 @@ class TrainConfig:
     models_dir: str = "models"
     logs_dir: str = "logs"
     resume: Optional[str] = None
+    save_every_iters: int = 5      # 每 N 轮额外保存一个带轮次的快照；0 表示关闭
+    keep_checkpoints: int = 5      # 最多保留几个轮次快照（0 表示全部保留）
 
     @classmethod
     def from_dict(cls, cfg: Dict) -> "TrainConfig":
@@ -96,7 +98,21 @@ class TrainConfig:
             opponents=dict(t.get("opponents", {"self": 0.6, "heuristic": 0.3, "random": 0.1})),
             models_dir=str(paths.get("models", "models")),
             logs_dir=str(paths.get("logs", "logs")),
+            save_every_iters=int(t.get("save_every_iters", 5)),
+            keep_checkpoints=int(t.get("keep_checkpoints", 5)),
         )
+
+
+def _prune_checkpoints(ckpt_dir: Path, keep: int):
+    """只保留最新的 keep 个轮次快照（文件名形如 ckpt_000010.pt）。"""
+    if keep <= 0:
+        return
+    files = sorted(ckpt_dir.glob("ckpt_*.pt"), key=lambda p: p.stat().st_mtime)
+    for old in files[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
 
 def set_seed(seed: int):
@@ -293,6 +309,19 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
                     "opt": opt.state_dict(),
                 },
             )
+            # ---------- 定期保存带轮次的快照 ----------
+            if tcfg.save_every_iters > 0 and iteration % tcfg.save_every_iters == 0:
+                ckpt_path = Path(tcfg.models_dir) / f"ckpt_{iteration:06d}.pt"
+                net.save(
+                    ckpt_path,
+                    extra={
+                        "iteration": iteration,
+                        "best_score": best_score,
+                        "opt": opt.state_dict(),
+                    },
+                )
+                _prune_checkpoints(Path(tcfg.models_dir), tcfg.keep_checkpoints)
+                print(f"  已保存检查点：{ckpt_path}")
             log_writer.writerow(
                 [
                     iteration,

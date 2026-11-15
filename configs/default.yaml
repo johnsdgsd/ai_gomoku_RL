@@ -35,6 +35,8 @@ train:
   replay_capacity: 200000
   eval_every: 100
   eval_games: 20
+  save_every_iters: 5      # 每 5 轮额外保存 models/ckpt_000005.pt 这类快照；0 关闭
+  keep_checkpoints: 5      # 只保留最近 5 个轮次快照（latest.pt 不受影响）
   opponents:
     self: 0.6
     heuristic: 0.3
