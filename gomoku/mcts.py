@@ -25,6 +25,7 @@ from .env import (
     is_full,
     legal_actions,
     other,
+    region_actions,
     side_of,
 )
 from .evaluators import find_win_moves
@@ -63,7 +64,7 @@ class Node:
         "N_total",
     )
 
-    def __init__(self, cells, to_move, last_move=None, parent=None, move=None):
+    def __init__(self, cells, to_move, last_move=None, parent=None, move=None, margin=0):
         self.cells = cells
         self.to_move = to_move
         self.last_move = last_move
@@ -94,7 +95,10 @@ class Node:
             self.terminal_value = 0.0 if winner is None else -1.0
         else:
             self.terminal_value = 0.0
-            self.legal = legal_actions(cells)
+            # 合法的**可落子**集合：整盘空位，或"外接正方形 + margin 圈"内的空位
+            self.legal = (
+                region_actions(cells, margin) if margin >= 0 else legal_actions(cells)
+            )
 
 
 @dataclass
@@ -121,6 +125,7 @@ class MCTS:
         root_noise: bool = False,
         dir_alpha: float = 0.3,
         dir_eps: float = 0.25,
+        margin: int = -1,
         rng: Optional[random.Random] = None,
     ):
         self.evaluator = evaluator
@@ -129,6 +134,8 @@ class MCTS:
         self.root_noise = bool(root_noise)
         self.dir_alpha = float(dir_alpha)
         self.dir_eps = float(dir_eps)
+        # 可落子范围："棋子外接正方形再外扩 margin 圈"；<0 表示全棋盘
+        self.margin = int(margin)
         self.rng = rng or random.Random()
 
     # ---------------- 展开 ----------------
@@ -156,7 +163,14 @@ class MCTS:
         if child is None:
             child_cells = list(parent.cells)
             child_cells[a] = parent.to_move
-            child = Node(child_cells, other(parent.to_move), a, parent=parent, move=a)
+            child = Node(
+                child_cells,
+                other(parent.to_move),
+                a,
+                parent=parent,
+                move=a,
+                margin=self.margin,
+            )
             parent.children[a] = child
         return child
 
@@ -208,7 +222,7 @@ class MCTS:
         if reuse_root is not None:
             root = reuse_root
         else:
-            root = Node(cells, to_move, last_move)
+            root = Node(cells, to_move, last_move, margin=self.margin)
 
         if root.terminal:
             return SearchResult(
@@ -266,14 +280,17 @@ class MCTS:
         best = self._argmax_visits(root)
         best_q = root.stats[best].q
 
-        # 硬规则保险（O(legal)）
+        # 硬规则保险：只在允许落子的区域内挑（区域内已被展开为 legal）
         chosen_by_rule = False
-        wins = find_win_moves(root.cells, root.to_move)
+        allowed = set(legal)
+        wins = [a for a in find_win_moves(root.cells, root.to_move) if a in allowed]
         if wins:
             best = min(wins)
             chosen_by_rule = True
         else:
-            opp_wins = find_win_moves(root.cells, other(root.to_move))
+            opp_wins = [
+                a for a in find_win_moves(root.cells, other(root.to_move)) if a in allowed
+            ]
             if len(opp_wins) == 1 and opp_wins[0] in root.children:
                 best = opp_wins[0]
                 chosen_by_rule = True

@@ -55,6 +55,7 @@ class TrainConfig:
     blocks: int = 3
     c_puct: float = 1.5
     root_noise: bool = True
+    dir_eps: float = 0.05          # 根节点噪声权重（越小越信网络先验）
     temp_moves: int = 15
     temp: float = 1.0
     opponents: Dict[str, float] = field(
@@ -64,6 +65,13 @@ class TrainConfig:
     heuristic_warmup_iters: int = 50
     # 训练对手（启发式）每步搜索次数：0=不走搜索；越大对手越强也越慢
     opponent_sims: int = 32
+    # 可落子范围："棋子外接正方形再外扩 margin 圈"；<0 表示全棋盘
+    search_margin: int = -1
+    # 开局跳过：训练时先用启发式随机走 K 手（0 关闭）
+    opening_moves: int = 0
+    opening_max: int = 0
+    # 策略标签截断：访问次数低于该值的动作清零后重归一化（0 关闭）
+    pi_min_visits: int = 0
     # 评测对手（永久固定为启发式 MCTS），以及其搜索次数
     eval_vs_heuristic_sims: int = 300
     models_dir: str = "models"
@@ -99,11 +107,16 @@ class TrainConfig:
             blocks=int(net.get("blocks", 3)),
             c_puct=float(m.get("c_puct", 1.5)),
             root_noise=bool(m.get("root_noise", True)),
+            dir_eps=float(m.get("dir_eps", 0.05)),
             temp_moves=int(m.get("temp_moves", 15)),
             temp=float(m.get("temp", 1.0)),
             opponents=dict(t.get("opponents", {"self": 0.6, "heuristic": 0.3, "random": 0.1})),
             heuristic_warmup_iters=int(t.get("heuristic_warmup_iters", 50)),
             opponent_sims=int(t.get("opponent_sims", 32)),
+            search_margin=int(m.get("search_margin", -1)),
+            opening_moves=int(t.get("opening_moves", 0)),
+            opening_max=int(t.get("opening_max", 0)),
+            pi_min_visits=int(t.get("pi_min_visits", 0)),
             eval_vs_heuristic_sims=int(t.get("eval_vs_heuristic_sims", 300)),
             models_dir=str(paths.get("models", "models")),
             logs_dir=str(paths.get("logs", "logs")),
@@ -161,19 +174,24 @@ def evaluate(
     sims: int,
     seed: int,
     vs_heuristic_sims: int = 300,
+    margin: int = -1,
 ) -> Dict[str, float]:
     """评测：固定使用启发式 MCTS（启发式评估器 + 搜索）作为对手。
 
     返回 {"heuristic": 得分率}（胜 1 / 平 0.5 / 负 0）。先后手交换由 arena 负责。
+    注意：`margin` 是“可落子范围”设置，不是比赛规则——比赛仍按全棋盘合法落子，
+    这里只让双方的**搜索**在该范围内分配算力，与训练保持一致。
     """
     agent = MCTSPlayer(
         NetEvaluator(net, device=device),
         simulations=sims,
+        margin=margin,
         rng=random.Random(seed),
     )
     opp = MCTSPlayer(
         HeuristicEvaluator(),
         simulations=vs_heuristic_sims,
+        margin=margin,
         rng=random.Random(seed + 1),
     )
     res = run_arena(agent, opp, games=games, size=net.size)
@@ -214,10 +232,15 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
         simulations=tcfg.sims_train,
         c_puct=tcfg.c_puct,
         root_noise=tcfg.root_noise,
+        dir_eps=tcfg.dir_eps,
         temp_moves=tcfg.temp_moves,
         temp=tcfg.temp,
         size=tcfg.size,
         opponent_sims=tcfg.opponent_sims,
+        search_margin=tcfg.search_margin,
+        opening_moves=tcfg.opening_moves,
+        opening_max=tcfg.opening_max,
+        pi_min_visits=tcfg.pi_min_visits,
     )
 
     log_path = Path(tcfg.logs_dir) / "train_log.csv"
@@ -245,6 +268,17 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
             else "全程自对弈"
         )
         + f"；每局 50% 先手 / 50% 后手；评测固定 vs 启发式 MCTS"
+    )
+    print(
+        "可落子范围："
+        + (
+            f"棋子外接矩形外扩 {tcfg.search_margin} 圈"
+            if tcfg.search_margin >= 0
+            else "全棋盘"
+        )
+        + f"；根噪声权重 dir_eps={tcfg.dir_eps}"
+        + (f"；开局跳过 {tcfg.opening_moves}-{tcfg.opening_max} 手" if tcfg.opening_moves > 0 else "")
+        + (f"；π 截断阈值 {tcfg.pi_min_visits}" if tcfg.pi_min_visits > 0 else "")
     )
 
     try:

@@ -90,6 +90,71 @@ def legal_actions(cells):
     return [i for i, v in enumerate(cells) if v == EMPTY]
 
 
+def action_region(cells, margin=2):
+    """返回允许落子的区域（"当前棋子的外接正方形再向外扩 margin 圈"）。
+
+    规则：
+      - 空棋盘：返回以棋盘中心为中心的 (2*margin+1) 见方区域（限制在棋盘内）
+      - 有棋子：取所有棋子所在行列的 min/max，再向四周扩 margin 圈，裁剪到棋盘内
+      - margin<=0 或 margin 很大时退化为全棋盘
+    返回 (r_min, r_max, c_min, c_max)，闭区间。
+    """
+    size = side_of(cells)
+    margin = int(margin)
+    if margin < 0:
+        margin = 0
+
+    r_min, r_max, c_min, c_max = size, -1, size, -1
+    for i, v in enumerate(cells):
+        if v != EMPTY:
+            r, c = divmod(i, size)
+            if r < r_min:
+                r_min = r
+            if r > r_max:
+                r_max = r
+            if c < c_min:
+                c_min = c
+            if c > c_max:
+                c_max = c
+
+    if r_max < 0:  # 空棋盘：中心附近
+        center = size // 2
+        r_min = r_max = center
+        c_min = c_max = center
+
+    r_lo = max(0, r_min - margin)
+    r_hi = min(size - 1, r_max + margin)
+    c_lo = max(0, c_min - margin)
+    c_hi = min(size - 1, c_max + margin)
+    return r_lo, r_hi, c_lo, c_hi
+
+
+def region_mask(cells, margin=2):
+    """区域掩码：区域内为 True 的布尔列表（长度 = len(cells)）。"""
+    size = side_of(cells)
+    r_lo, r_hi, c_lo, c_hi = action_region(cells, margin)
+    mask = [False] * len(cells)
+    for r in range(r_lo, r_hi + 1):
+        base = r * size
+        for c in range(c_lo, c_hi + 1):
+            mask[base + c] = True
+    return mask
+
+
+def region_actions(cells, margin=2):
+    """区域内的合法动作（空位 ∩ 区域）。"""
+    size = side_of(cells)
+    r_lo, r_hi, c_lo, c_hi = action_region(cells, margin)
+    out = []
+    for r in range(r_lo, r_hi + 1):
+        base = r * size
+        for c in range(c_lo, c_hi + 1):
+            a = base + c
+            if cells[a] == EMPTY:
+                out.append(a)
+    return out
+
+
 def is_full(cells):
     return all(v != EMPTY for v in cells)
 

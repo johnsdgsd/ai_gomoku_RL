@@ -80,6 +80,7 @@ class MCTSPlayer(Player):
         c_puct: float = 1.5,
         temperature: float = 0.0,
         root_noise: bool = False,
+        margin: int = -1,
         rng: Optional[random.Random] = None,
     ):
         self.name = "mcts"
@@ -89,6 +90,7 @@ class MCTSPlayer(Player):
             simulations=simulations,
             c_puct=c_puct,
             root_noise=root_noise,
+            margin=margin,
             rng=rng,
         )
         self.temperature = temperature
@@ -130,6 +132,7 @@ def make_player(
     mcts_cfg = cfg.get("mcts", {})
     sims = int(mcts_cfg.get("sims_play", 800))
     c_puct = float(mcts_cfg.get("c_puct", 1.5))
+    margin = int(mcts_cfg.get("search_margin", -1))
 
     spec = (spec or "heuristic").strip()
     if spec == "random":
@@ -137,12 +140,14 @@ def make_player(
     if spec == "greedy":
         return GreedyPlayer(random.Random(seed))
     if spec in ("heuristic", "mcts-heuristic"):
-        return heuristic_player(sims, seed=seed, c_puct=c_puct)
+        return heuristic_player(sims, seed=seed, c_puct=c_puct, margin=margin)
     if spec.startswith("net"):
         if net is None:
             from .network import load_network
 
             path = spec.split(":", 1)[1] if ":" in spec else "models/best.pt"
             net = load_network(path, device=device, size=size)
-        return net_player(net, device=device, simulations=sims, seed=seed, c_puct=c_puct)
+        return net_player(
+            net, device=device, simulations=sims, seed=seed, c_puct=c_puct, margin=margin
+        )
     raise ValueError(f"未知玩家类型: {spec!r}（可选 random/greedy/heuristic/net:path）")

@@ -20,7 +20,8 @@ mcts:
   c_puct: 1.5
   root_noise: true
   dir_alpha: 0.3
-  dir_eps: 0.25
+  dir_eps: 0.05          # 根节点噪声权重：0.75*网络先验 + 0.05*噪声（越小越信网络）
+  search_margin: 2       # 可落子范围：棋子外接矩形再外扩 N 圈；-1 表示全棋盘
   temp_moves: 15
   temp: 1.0
 
@@ -42,4 +43,8 @@ train:
   heuristic_warmup_iters: 50   # 前 N 轮用启发式 AI 陪练；N=0 表示全程自对弈
   opponent_sims: 32            # 训练对手每步搜索次数；0=不搜索（纯贪心），越大越强越慢
   eval_vs_heuristic_sims: 300  # 评测时启发式 MCTS 的搜索次数（对手强弱）
+  # ---- 数据质量 ----
+  opening_moves: 0             # 训练开局先用启发式走 K 手，跳过网络弱开局；0=不启用
+  opening_max: 0               # K 的上限（随机取 [opening_moves, opening_max]）
+  pi_min_visits: 0             # 策略标签只保留访问次数 >= N 的动作；0=不截断
   # 每局先手/后手各 50%，由训练循环内部随机决定，无需配置
