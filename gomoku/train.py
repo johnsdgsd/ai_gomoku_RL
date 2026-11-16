@@ -167,6 +167,45 @@ def _opponent_for_iteration(tcfg: "TrainConfig", iteration: int, rng: random.Ran
     return "self"
 
 
+def _format_config(tcfg: "TrainConfig", device: str, start_iteration: int = 0) -> str:
+    """把本次训练用到的全部关键参数打印成一块，便于事后复盘。"""
+    lines = [
+        "=" * 62,
+        f"训练配置（起始迭代 {start_iteration}，以下参数均为本次实际生效值）",
+        "-" * 62,
+        f"设备        device={device}",
+        f"棋盘        board.size={tcfg.size}",
+        f"网络        channels={tcfg.channels}, blocks={tcfg.blocks}",
+        f"搜索        sims_train={tcfg.sims_train}, sims_eval={tcfg.sims_eval}, "
+        f"c_puct={tcfg.c_puct}",
+        f"根噪声      root_noise={tcfg.root_noise}, dir_eps={tcfg.dir_eps}",
+        f"落子范围    search_margin="
+        + (
+            f"{tcfg.search_margin}（外接矩形外扩，-1=全棋盘）"
+            if tcfg.search_margin >= 0
+            else "-1（全棋盘）"
+        ),
+        f"温度        temp_moves={tcfg.temp_moves}, temp={tcfg.temp}",
+        f"对局        iterations={tcfg.iterations}, games_per_iter={tcfg.games_per_iter}, "
+        f"先手比例=50%",
+        f"对手        heuristic_warmup_iters={tcfg.heuristic_warmup_iters}, "
+        f"opponent_sims={tcfg.opponent_sims}",
+        f"评测        固定 vs 启发式 MCTS, eval_vs_heuristic_sims={tcfg.eval_vs_heuristic_sims}, "
+        f"eval_every={tcfg.eval_every} 局, eval_games={tcfg.eval_games}",
+        f"更新        batch_size={tcfg.batch_size}, updates_per_iter={tcfg.updates_per_iter}, "
+        f"lr={tcfg.lr}, weight_decay={tcfg.weight_decay}",
+        f"损失        c_policy={tcfg.c_policy}, lambda_vbar={tcfg.lambda_vbar}",
+        f"回放池      capacity={tcfg.replay_capacity}",
+        f"数据选项    opening_moves={tcfg.opening_moves}, opening_max={tcfg.opening_max}, "
+        f"pi_min_visits={tcfg.pi_min_visits}",
+        f"存档        save_every_iters={tcfg.save_every_iters}, "
+        f"keep_checkpoints={tcfg.keep_checkpoints}, models={tcfg.models_dir}, logs={tcfg.logs_dir}",
+        f"随机种子    seed={tcfg.seed}",
+        "=" * 62,
+    ]
+    return "\n".join(lines)
+
+
 def evaluate(
     net: Network,
     device: str,
@@ -255,31 +294,7 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
 
     total_games = 0
     t_start = time.time()
-    warmup = tcfg.heuristic_warmup_iters
-    print(
-        f"开始训练：迭代 {tcfg.iterations} 次 × {tcfg.games_per_iter} 局，"
-        f"每步 {tcfg.sims_train} 次模拟，device={device}"
-    )
-    print(
-        "对手策略："
-        + (
-            f"前 {warmup} 轮用启发式陪练，之后纯自对弈"
-            if warmup > 0
-            else "全程自对弈"
-        )
-        + f"；每局 50% 先手 / 50% 后手；评测固定 vs 启发式 MCTS"
-    )
-    print(
-        "可落子范围："
-        + (
-            f"棋子外接矩形外扩 {tcfg.search_margin} 圈"
-            if tcfg.search_margin >= 0
-            else "全棋盘"
-        )
-        + f"；根噪声权重 dir_eps={tcfg.dir_eps}"
-        + (f"；开局跳过 {tcfg.opening_moves}-{tcfg.opening_max} 手" if tcfg.opening_moves > 0 else "")
-        + (f"；π 截断阈值 {tcfg.pi_min_visits}" if tcfg.pi_min_visits > 0 else "")
-    )
+    print(_format_config(tcfg, device, iteration))
 
     try:
         for it in range(1, tcfg.iterations + 1):
