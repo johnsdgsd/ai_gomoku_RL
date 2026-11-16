@@ -42,6 +42,9 @@ DEFAULTS: Dict[str, Any] = {
         "eval_games": 20,
         "save_every_iters": 5,
         "keep_checkpoints": 5,
+        "heuristic_warmup_iters": 50,
+        "opponent_sims": 32,
+        "eval_vs_heuristic_sims": 300,
         "opponents": {"self": 0.6, "heuristic": 0.3, "random": 0.1},
     },
 }

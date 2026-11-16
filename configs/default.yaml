@@ -38,7 +38,8 @@ train:
   eval_games: 20
   save_every_iters: 5      # 每 5 轮额外保存 models/ckpt_000005.pt 这类快照；0 关闭
   keep_checkpoints: 5      # 只保留最近 5 个轮次快照（latest.pt 不受影响）
-  opponents:
-    self: 0.6
-    heuristic: 0.3
-    random: 0.1
+  # ---- 训练对手与评测 ----
+  heuristic_warmup_iters: 50   # 前 N 轮用启发式 AI 陪练；N=0 表示全程自对弈
+  opponent_sims: 32            # 训练对手每步搜索次数；0=不搜索（纯贪心），越大越强越慢
+  eval_vs_heuristic_sims: 300  # 评测时启发式 MCTS 的搜索次数（对手强弱）
+  # 每局先手/后手各 50%，由训练循环内部随机决定，无需配置

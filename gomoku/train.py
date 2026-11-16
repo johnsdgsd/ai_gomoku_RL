@@ -21,9 +21,9 @@ import numpy as np
 from .arena import arena as run_arena
 from .device import DEFAULTS
 from .env import BOARD_SIZE, P1, P2
-from .evaluators import NetEvaluator
+from .evaluators import HeuristicEvaluator, NetEvaluator
 from .network import Network, build_network
-from .players import GreedyPlayer, MCTSPlayer, RandomPlayer
+from .players import MCTSPlayer
 from .replay import ReplayBuffer
 from .selfplay import SelfPlayConfig, play_selfplay
 
@@ -60,6 +60,12 @@ class TrainConfig:
     opponents: Dict[str, float] = field(
         default_factory=lambda: {"self": 0.6, "heuristic": 0.3, "random": 0.1}
     )
+    # 训练对手策略：前 N 轮用启发式陪练，之后纯自对弈（N=0 表示全程自对弈）
+    heuristic_warmup_iters: int = 50
+    # 训练对手（启发式）每步搜索次数：0=不走搜索；越大对手越强也越慢
+    opponent_sims: int = 32
+    # 评测对手（永久固定为启发式 MCTS），以及其搜索次数
+    eval_vs_heuristic_sims: int = 300
     models_dir: str = "models"
     logs_dir: str = "logs"
     resume: Optional[str] = None
@@ -96,6 +102,9 @@ class TrainConfig:
             temp_moves=int(m.get("temp_moves", 15)),
             temp=float(m.get("temp", 1.0)),
             opponents=dict(t.get("opponents", {"self": 0.6, "heuristic": 0.3, "random": 0.1})),
+            heuristic_warmup_iters=int(t.get("heuristic_warmup_iters", 50)),
+            opponent_sims=int(t.get("opponent_sims", 32)),
+            eval_vs_heuristic_sims=int(t.get("eval_vs_heuristic_sims", 300)),
             models_dir=str(paths.get("models", "models")),
             logs_dir=str(paths.get("logs", "logs")),
             save_every_iters=int(t.get("save_every_iters", 5)),
@@ -137,21 +146,38 @@ def _pick_opponent(opponents: Dict[str, float], rng: random.Random) -> str:
     return rng.choices(names, weights=[w / total for w in weights], k=1)[0]
 
 
+def _opponent_for_iteration(tcfg: "TrainConfig", iteration: int, rng: random.Random) -> str:
+    """训练对手策略：前 warmup_iters 轮用启发式陪练，之后纯自对弈。"""
+    n = tcfg.heuristic_warmup_iters
+    if n > 0 and iteration <= n:
+        return "heuristic"
+    return "self"
+
+
 def evaluate(
-    net: Network, device: str, games: int, sims: int, seed: int
+    net: Network,
+    device: str,
+    games: int,
+    sims: int,
+    seed: int,
+    vs_heuristic_sims: int = 300,
 ) -> Dict[str, float]:
-    """对 greedy / random 各打若干局，返回得分率（胜 1 平 0.5）。"""
-    out = {}
-    for name, cls in (("greedy", GreedyPlayer), ("random", RandomPlayer)):
-        agent = MCTSPlayer(
-            NetEvaluator(net, device=device),
-            simulations=sims,
-            rng=random.Random(seed),
-        )
-        opp = cls(random.Random(seed + 1))
-        res = run_arena(agent, opp, games=games, size=net.size)
-        out[name] = res.score
-    return out
+    """评测：固定使用启发式 MCTS（启发式评估器 + 搜索）作为对手。
+
+    返回 {"heuristic": 得分率}（胜 1 / 平 0.5 / 负 0）。先后手交换由 arena 负责。
+    """
+    agent = MCTSPlayer(
+        NetEvaluator(net, device=device),
+        simulations=sims,
+        rng=random.Random(seed),
+    )
+    opp = MCTSPlayer(
+        HeuristicEvaluator(),
+        simulations=vs_heuristic_sims,
+        rng=random.Random(seed + 1),
+    )
+    res = run_arena(agent, opp, games=games, size=net.size)
+    return {"heuristic": res.score}
 
 
 def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
@@ -191,6 +217,7 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
         temp_moves=tcfg.temp_moves,
         temp=tcfg.temp,
         size=tcfg.size,
+        opponent_sims=tcfg.opponent_sims,
     )
 
     log_path = Path(tcfg.logs_dir) / "train_log.csv"
@@ -200,22 +227,33 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
     if write_header:
         log_writer.writerow(
             ["iteration", "games", "buffer", "loss_policy", "loss_value",
-             "eval_greedy", "eval_random", "elapsed_s"]
+             "eval_heuristic", "elapsed_s"]
         )
 
     total_games = 0
     t_start = time.time()
+    warmup = tcfg.heuristic_warmup_iters
     print(
         f"开始训练：迭代 {tcfg.iterations} 次 × {tcfg.games_per_iter} 局，"
         f"每步 {tcfg.sims_train} 次模拟，device={device}"
+    )
+    print(
+        "对手策略："
+        + (
+            f"前 {warmup} 轮用启发式陪练，之后纯自对弈"
+            if warmup > 0
+            else "全程自对弈"
+        )
+        + f"；每局 50% 先手 / 50% 后手；评测固定 vs 启发式 MCTS"
     )
 
     try:
         for it in range(1, tcfg.iterations + 1):
             iteration += 1
             net.eval()
+            opp_name = _opponent_for_iteration(tcfg, iteration, rng)
             for _ in range(tcfg.games_per_iter):
-                opp_name = _pick_opponent(tcfg.opponents, rng)
+                # 每局 50% 先手 / 50% 后手
                 agent_first = rng.random() < 0.5
                 records, winner, steps = play_selfplay(
                     net,
@@ -270,7 +308,7 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
                 )
 
             elapsed = time.time() - t_start
-            eval_g = eval_r = None
+            eval_h = None
             loss_desc = (
                 f"loss_p={loss_p:.4f} loss_v={loss_v:.4f}"
                 if loss_p is not None
@@ -279,24 +317,28 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
             if total_games % max(1, tcfg.eval_every) < tcfg.games_per_iter:
                 net.eval()
                 scores = evaluate(
-                    net, device, tcfg.eval_games, tcfg.sims_eval, seed=tcfg.seed + iteration
+                    net,
+                    device,
+                    tcfg.eval_games,
+                    tcfg.sims_eval,
+                    seed=tcfg.seed + iteration,
+                    vs_heuristic_sims=tcfg.eval_vs_heuristic_sims,
                 )
-                eval_g, eval_r = scores["greedy"], scores["random"]
-                mean_score = (eval_g + eval_r) / 2.0
-                if mean_score > best_score:
-                    best_score = mean_score
+                eval_h = scores["heuristic"]
+                if eval_h > best_score:
+                    best_score = eval_h
                     net.save(
                         Path(tcfg.models_dir) / "best.pt",
                         extra={"iteration": iteration, "best_score": best_score},
                     )
                 print(
-                    f"[迭代 {iteration}] buffer={len(buffer)} {loss_desc} "
-                    f"vs greedy={eval_g:.1%} vs random={eval_r:.1%} "
+                    f"[迭代 {iteration}] opp={opp_name} buffer={len(buffer)} {loss_desc} "
+                    f"vs heuristic={eval_h:.1%} "
                     f"用时 {elapsed / 60:.1f}m"
                 )
             else:
                 print(
-                    f"[迭代 {iteration}] buffer={len(buffer)} {loss_desc} "
+                    f"[迭代 {iteration}] opp={opp_name} buffer={len(buffer)} {loss_desc} "
                     f"用时 {elapsed / 60:.1f}m"
                 )
 
@@ -329,8 +371,7 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
                     len(buffer),
                     "" if loss_p is None else f"{loss_p:.6f}",
                     "" if loss_v is None else f"{loss_v:.6f}",
-                    "" if eval_g is None else f"{eval_g:.4f}",
-                    "" if eval_r is None else f"{eval_r:.4f}",
+                    "" if eval_h is None else f"{eval_h:.4f}",
                     f"{elapsed:.1f}",
                 ]
             )
