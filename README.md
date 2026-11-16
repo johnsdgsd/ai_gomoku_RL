@@ -40,11 +40,49 @@ $py = "D:\WYJ\Anaconda\Anaconda3\envs\MyRL\python.exe"
 # 3) 训练（小规模冒烟）
 & $py -m gomoku train --iterations 2 --games-per-iter 5 --sims-train 20 --device cpu
 
-# 4) 用训练好的模型对局
+# 4) 续训（从上次的存档继续；--iterations 是"再跑多少轮"，不是总数）
+& $py -m gomoku train --resume models/latest.pt --iterations 100 --games-per-iter 20 --sims-train 200
+
+# 5) 用训练好的模型对局
 & $py -m gomoku play --algo net --model models/best.pt --human p2 --device cpu
 ```
 
 > 通过管道/脚本喂输入时不会弹交互提问（`stdin` 不是终端），此时请显式加 `--human p1|p2`。
+
+## 续训
+
+训练每轮结束都会写 `models/latest.pt`（含网络、优化器状态、迭代号），中断后可以直接续：
+
+```powershell
+# 从 latest.pt 继续，再跑 100 轮
+& $py -m gomoku train --resume models/latest.pt --iterations 100 --games-per-iter 20 --sims-train 200
+
+# 服务器后台续训（关掉终端也不停）
+nohup python -m gomoku train --resume models/latest.pt --iterations 100 \
+  --games-per-iter 20 --sims-train 200 > logs/resume.log 2>&1 &
+```
+
+要点：
+
+| 项 | 说明 |
+|---|---|
+| `--resume` | 路径写 `models/latest.pt`（也接受任意 `ckpt_0000NN.pt`） |
+| `--iterations` | **本次还要跑多少轮**；起始迭代号会从存档里接着累加 |
+| 优化器状态 | 一起恢复，学习率/动量不会重置 |
+| 回放池 | **不会恢复**（体积大），前几轮会重新积累；`batch_size=128` 时通常 2–3 局就够 |
+| 尺寸校验 | 存档里记录了 `board_size`，与配置不一致会报错并提示改用 `--board-size` |
+| 快照 | 每 `save_every_iters`（默认 5）轮额外写 `models/ckpt_0000NN.pt`，可指定任一快照续训 |
+
+续训时终端会先打印完整配置，第一行显示 `起始迭代 N`，可以确认接得上：
+
+```
+==============================================================
+训练配置（起始迭代 50，以下参数均为本次实际生效值）
+--------------------------------------------------------------
+设备        device=cuda
+...
+```
+
 
 ## 棋盘尺寸配置
 
