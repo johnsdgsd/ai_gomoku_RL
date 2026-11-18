@@ -13,9 +13,11 @@
 
 from __future__ import annotations
 
+import os
 import random
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Sequence
 
 import numpy as np
@@ -124,3 +126,92 @@ class ReplayBuffer:
             "pis": pis,
             "targets": targets,
         }
+
+    # ---------- 持久化 ----------
+    def save(self, path) -> int:
+        """把整个回放池原子写入 .npz，返回写入的条数。
+
+        先写 `xxx.npz.tmp` 再 `os.replace`，中途被打断不会损坏已有文件。
+        所有数组都是定长的，压缩后体积约为裸 float32 的 1/10（局面是 0/1 平面）。
+        """
+        n = len(self.buf)
+        if n == 0:
+            raise ValueError("回放池为空，无法保存")
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        size = int(self.buf[0].state.shape[-1])
+
+        states = np.empty((n, 4, size, size), dtype=np.uint8)
+        actions = np.empty(n, dtype=np.int16)
+        pis = np.empty((n, size * size), dtype=np.float32)
+        vbars = np.empty(n, dtype=np.float32)
+        to_moves = np.empty(n, dtype=np.int8)
+        zs = np.empty(n, dtype=np.float32)
+        for i, rec in enumerate(self.buf):
+            states[i] = rec.state
+            actions[i] = rec.action
+            pis[i] = rec.pi
+            vbars[i] = rec.vbar
+            to_moves[i] = rec.to_move
+            zs[i] = rec.z
+
+        tmp = path.with_name(path.name + ".tmp")
+        with open(tmp, "wb") as fh:
+            np.savez_compressed(
+                fh,
+                capacity=np.int64(self.buf.maxlen or n),
+                size=np.int64(size),
+                states=states,
+                actions=actions,
+                pis=pis,
+                vbars=vbars,
+                to_moves=to_moves,
+                zs=zs,
+            )
+        os.replace(tmp, path)
+        return n
+
+    @classmethod
+    def load(cls, path, capacity: Optional[int] = None, seed: int = 0) -> "ReplayBuffer":
+        """从 .npz 恢复回放池。
+
+        `capacity` 显式给出时以它为准（用于续训时把池子改小），否则沿用保存时的容量。
+        z 已经回填过，恢复后可以直接采样训练。
+        """
+        path = Path(path)
+        with np.load(path, allow_pickle=False) as data:
+            files = set(data.files)
+            states = np.asarray(data["states"])
+            actions = np.asarray(data["actions"])
+            pis = np.asarray(data["pis"])
+            vbars = np.asarray(data["vbars"])
+            to_moves = np.asarray(data["to_moves"])
+            zs = np.asarray(data["zs"]) if "zs" in files else np.zeros(len(actions), np.float32)
+            stored_cap = int(data["capacity"]) if "capacity" in files else len(actions)
+        size = int(states.shape[-1])
+        if pis.shape[1] != size * size:
+            raise ValueError(
+                f"回放池尺寸不一致：state 是 {size}x{size}，pi 长度却是 {pis.shape[1]}"
+            )
+
+        cap = int(capacity) if capacity is not None else stored_cap
+        if cap < len(actions):
+            # 池子被改小时只保留最新的记录
+            keep = slice(len(actions) - cap, len(actions))
+            states, actions = states[keep], actions[keep]
+            pis, vbars = pis[keep], vbars[keep]
+            to_moves, zs = to_moves[keep], zs[keep]
+
+        buf = cls(capacity=max(1, cap), seed=seed)
+        for i in range(len(actions)):
+            buf.buf.append(
+                Record(
+                    state=states[i].copy(),
+                    action=int(actions[i]),
+                    pi=pis[i].copy(),
+                    vbar=float(vbars[i]),
+                    to_move=int(to_moves[i]),
+                    z=float(zs[i]),
+                )
+            )
+        return buf

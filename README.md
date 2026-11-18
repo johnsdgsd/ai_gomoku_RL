@@ -3,7 +3,7 @@
 从"DQN + MCTS"重构而来：修正了原实现中 MCTS 价值符号取反、终局节点继续扩展、防守数据不可解等问题，
 改为 **策略/价值双头网络 + PUCT MCTS + 自对弈训练**，并保留一个零额外依赖的棋型启发式搜索作为开箱即用的对手。
 
-棋盘尺寸由 `configs/default.yaml` 的 `board.size` 决定（默认 9），网络、编码、回放池、搜索全部按尺寸自适应；
+棋盘尺寸由 `configs/default.yaml` 的 `board.size` 决定（默认 15），网络、编码、回放池、搜索全部按尺寸自适应；
 15×15 只需改一行配置（或 `--board-size 15`）。
 
 ## 环境
@@ -69,9 +69,30 @@ nohup python -m gomoku train --resume models/latest.pt --iterations 100 \
 | `--resume` | 路径写 `models/latest.pt`（也接受任意 `ckpt_0000NN.pt`） |
 | `--iterations` | **本次还要跑多少轮**；起始迭代号会从存档里接着累加 |
 | 优化器状态 | 一起恢复，学习率/动量不会重置 |
-| 回放池 | **不会恢复**（体积大），前几轮会重新积累；`batch_size=128` 时通常 2–3 局就够 |
+| 回放池 | **默认自动恢复** `models/buffer.npz`；加 `--fresh-buffer` 可只恢复网络、清空经验 |
 | 尺寸校验 | 存档里记录了 `board_size`，与配置不一致会报错并提示改用 `--board-size` |
 | 快照 | 每 `save_every_iters`（默认 5）轮额外写 `models/ckpt_0000NN.pt`，可指定任一快照续训 |
+
+### 回放池持久化
+
+每 `save_every_iters` 轮会连回放池一起落盘，续训时自动读回来接着用：
+
+```yaml
+train:
+  replay_capacity: 30000   # 池子上限：约 1500 局 / 75 轮，保证经验不过期
+  save_buffer: true        # 定期写 models/buffer.npz（原子写入，中途打断不会损坏）
+  resume_buffer: true      # 续训时自动恢复
+```
+
+```powershell
+# 正常续训：网络 + 优化器 + 回放池 全部恢复
+& $py -m gomoku train --resume models/latest.pt --iterations 100
+
+# 想换一批经验重来：只恢复网络
+& $py -m gomoku train --resume models/latest.pt --iterations 100 --fresh-buffer
+```
+
+`buffer.npz` 里局面是 0/1 平面，压缩后 3 万条约 2–20 MB（局面越满压缩率越低）。删除该文件等同于 `--fresh-buffer`。
 
 续训时终端会先打印完整配置，第一行显示 `起始迭代 N`，可以确认接得上：
 
@@ -188,7 +209,7 @@ gomoku/
   mcts.py         PUCT MCTS
   players.py      random / greedy / MCTS 玩家
   arena.py        对拉评测
-  replay.py       回放池（uint8 压缩 + 对称增广）
+  replay.py       回放池（uint8 压缩 + 对称增广 + npz 存取）
   selfplay.py     自对弈生成数据
   network.py      策略/价值网络与存档
   train.py        训练主循环（评测、best 模型、续训、CSV 日志）

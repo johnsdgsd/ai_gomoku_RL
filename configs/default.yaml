@@ -20,7 +20,8 @@ mcts:
   c_puct: 1.5
   root_noise: true
   dir_alpha: 0.3
-  dir_eps: 0.05          # 根节点噪声权重：0.75*网络先验 + 0.05*噪声（越小越信网络）
+  dir_eps: 0.25          # 根节点噪声权重：先验 = (1-dir_eps)*网络概率 + dir_eps*噪声
+                         # 0.25 是 AlphaZero 原版取值；调小会让自对弈开局高度雷同
   search_margin: 2       # 可落子范围：棋子外接矩形再外扩 N 圈；-1 表示全棋盘
   temp_moves: 15
   temp: 1.0
@@ -29,16 +30,18 @@ train:
   iterations: 50
   games_per_iter: 20
   batch_size: 128
-  updates_per_iter: 50
+  updates_per_iter: 100    # 每轮梯度更新批数；越大旧数据被反复利用越多，配小学习率更稳
   lr: 0.002
   weight_decay: 0.0001
   c_policy: 1.0
   lambda_vbar: 0.2
-  replay_capacity: 200000
+  replay_capacity: 30000   # 回放池容量：约等于「最近多少条经验」。30000 条 ≈ 1500 局 ≈ 75 轮
   eval_every: 100
   eval_games: 20
   save_every_iters: 5      # 每 5 轮额外保存 models/ckpt_000005.pt 这类快照；0 关闭
   keep_checkpoints: 5      # 只保留最近 5 个轮次快照（latest.pt 不受影响）
+  save_buffer: true        # 每 save_every_iters 轮把回放池写到 models/buffer.npz
+  resume_buffer: true      # 续训时自动读取 models/buffer.npz，接着用旧经验
   # ---- 训练对手与评测 ----
   heuristic_warmup_iters: 50   # 前 N 轮用启发式 AI 陪练；N=0 表示全程自对弈
   opponent_sims: 32            # 训练对手每步搜索次数；0=不搜索（纯贪心），越大越强越慢

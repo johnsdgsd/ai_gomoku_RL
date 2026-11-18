@@ -44,7 +44,7 @@ class TrainConfig:
     weight_decay: float = 0.0001
     c_policy: float = 1.0
     lambda_vbar: float = 0.2
-    replay_capacity: int = 100_000
+    replay_capacity: int = 30_000
     eval_every: int = 100
     eval_games: int = 20
     sims_train: int = 150
@@ -79,6 +79,8 @@ class TrainConfig:
     resume: Optional[str] = None
     save_every_iters: int = 5      # 每 N 轮额外保存一个带轮次的快照；0 表示关闭
     keep_checkpoints: int = 5      # 最多保留几个轮次快照（0 表示全部保留）
+    save_buffer: bool = True       # 定期把回放池写到 models/buffer.npz
+    resume_buffer: bool = True     # 续训时自动恢复 models/buffer.npz
 
     @classmethod
     def from_dict(cls, cfg: Dict) -> "TrainConfig":
@@ -122,6 +124,8 @@ class TrainConfig:
             logs_dir=str(paths.get("logs", "logs")),
             save_every_iters=int(t.get("save_every_iters", 5)),
             keep_checkpoints=int(t.get("keep_checkpoints", 5)),
+            save_buffer=bool(t.get("save_buffer", True)),
+            resume_buffer=bool(t.get("resume_buffer", True)),
         )
 
 
@@ -195,7 +199,8 @@ def _format_config(tcfg: "TrainConfig", device: str, start_iteration: int = 0) -
         f"更新        batch_size={tcfg.batch_size}, updates_per_iter={tcfg.updates_per_iter}, "
         f"lr={tcfg.lr}, weight_decay={tcfg.weight_decay}",
         f"损失        c_policy={tcfg.c_policy}, lambda_vbar={tcfg.lambda_vbar}",
-        f"回放池      capacity={tcfg.replay_capacity}",
+        f"回放池      capacity={tcfg.replay_capacity}, save_buffer={tcfg.save_buffer}, "
+        f"resume_buffer={tcfg.resume_buffer}",
         f"数据选项    opening_moves={tcfg.opening_moves}, opening_max={tcfg.opening_max}, "
         f"pi_min_visits={tcfg.pi_min_visits}",
         f"存档        save_every_iters={tcfg.save_every_iters}, "
@@ -266,6 +271,20 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
             )
             opt.load_state_dict(extra["opt"])
         print(f"续训：从迭代 {iteration} 继续，best_score={best_score:.3f}")
+
+    # ---------- 回放池：续训时自动恢复 ----------
+    buffer_path = Path(tcfg.models_dir) / "buffer.npz"
+    if tcfg.resume and tcfg.resume_buffer:
+        if buffer_path.is_file():
+            try:
+                buffer = ReplayBuffer.load(
+                    buffer_path, capacity=tcfg.replay_capacity, seed=tcfg.seed
+                )
+                print(f"续训：恢复回放池 {len(buffer)} 条（{buffer_path}）")
+            except (OSError, ValueError, KeyError) as exc:
+                print(f"续训：回放池读取失败（{exc}），从空池开始")
+        else:
+            print(f"续训：未找到 {buffer_path}，从空池开始")
 
     sp_cfg = SelfPlayConfig(
         simulations=tcfg.sims_train,
@@ -413,6 +432,13 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
                 )
                 _prune_checkpoints(Path(tcfg.models_dir), tcfg.keep_checkpoints)
                 print(f"  已保存检查点：{ckpt_path}")
+                if tcfg.save_buffer and len(buffer) > 0:
+                    try:
+                        n_saved = buffer.save(buffer_path)
+                        mb = buffer_path.stat().st_size / 1024 / 1024
+                        print(f"  已保存回放池：{buffer_path}（{n_saved} 条, {mb:.1f} MB）")
+                    except (OSError, ValueError) as exc:
+                        print(f"  回放池保存失败：{exc}")
             log_writer.writerow(
                 [
                     iteration,
@@ -429,5 +455,10 @@ def train(tcfg: Optional[TrainConfig] = None, device: str = "cpu") -> Network:
         log_file.close()
 
     net.save(Path(tcfg.models_dir) / "final.pt", extra={"iteration": iteration})
+    if tcfg.save_buffer and len(buffer) > 0:
+        try:
+            buffer.save(buffer_path)
+        except (OSError, ValueError):
+            pass
     print(f"训练完成，模型保存在 {tcfg.models_dir}/final.pt")
     return net

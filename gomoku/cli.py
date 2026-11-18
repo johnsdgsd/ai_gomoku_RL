@@ -206,6 +206,8 @@ def cmd_train(args, cfg):
         tcfg.seed = args.seed
     if args.resume:
         tcfg.resume = args.resume
+    if getattr(args, "fresh_buffer", False):
+        tcfg.resume_buffer = False
     print(f"训练设备：{device}｜棋盘 {tcfg.size}x{tcfg.size}")
     run_train(tcfg, device=device)
     return 0
@@ -260,6 +262,11 @@ def build_parser():
     tr.add_argument("--sims-train", type=int, default=None)
     tr.add_argument("--board-size", type=int, default=None, help="覆盖配置里的棋盘尺寸")
     tr.add_argument("--resume", default=None, help="从 checkpoint 继续训练")
+    tr.add_argument(
+        "--fresh-buffer",
+        action="store_true",
+        help="续训时不恢复回放池（只恢复网络权重）",
+    )
     tr.add_argument("--device", default=None)
     tr.add_argument("--seed", type=int, default=None)
     tr.set_defaults(func=cmd_train)
