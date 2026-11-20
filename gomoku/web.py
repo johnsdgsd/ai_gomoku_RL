@@ -68,33 +68,47 @@ class Game:
             b = b.play(h["action"])
         self.board = b
 
-    def _snapshot(self, action: int, to_move: int, res) -> Dict[str, Any]:
+    def _candidates(self, res) -> List[Dict[str, Any]]:
         cands: List[Dict[str, Any]] = []
-        if res is not None and getattr(res, "root", None) is not None:
-            stats = res.root.stats or {}
-            priors = res.root.priors or {}
-            for a, st in stats.items():
-                if st.N <= 0:
-                    continue
-                cands.append(
-                    {
-                        "a": int(a),
-                        "n": int(st.N),
-                        "q": round(float(st.q), 4),
-                        "pi": round(float(priors.get(a, 0.0)), 4),
-                    }
-                )
-            cands.sort(key=lambda d: -d["n"])
-            cands = cands[:MAX_CANDIDATES]
-        value = float(res.value) if res is not None else 0.0
+        if res is None or getattr(res, "root", None) is None:
+            return cands
+        stats = res.root.stats or {}
+        priors = res.root.priors or {}
+        for a, st in stats.items():
+            if st.N <= 0:
+                continue
+            cands.append(
+                {
+                    "a": int(a),
+                    "n": int(st.N),
+                    "q": round(float(st.q), 4),
+                    "pi": round(float(priors.get(a, 0.0)), 4),
+                }
+            )
+        cands.sort(key=lambda d: -d["n"])
+        return cands[:MAX_CANDIDATES]
+
+    def _ply_entry(self, action: int, mover: int, res) -> Dict[str, Any]:
+        """生成一手棋的记录。**必须在落子之后调用。**
+
+        - `value_black`：这手**之后**局面的网络静态评估（人类和 AI 用同一把尺子，
+          所以价值曲线可以逐手相连，不会因为"搜索 vs 静态"来回跳）。
+        - `value` / `search_black`：本次搜索自己的判断（人类着法为 None）。
+        """
+        static_v, tm = self._static_value()
+        value_black = None if static_v is None else (static_v if tm == P1 else -static_v)
+        search_v = None if res is None else float(res.value)
         return {
             "action": int(action),
-            "by": int(to_move),
-            "value": round(value, 4),
-            "value_black": round(value if to_move == P1 else -value, 4),
-            "best_q": round(float(res.best_q), 4) if res is not None else 0.0,
+            "by": int(mover),
+            "value": None if search_v is None else round(search_v, 4),
+            "value_black": None if value_black is None else round(value_black, 4),
+            "search_black": (
+                None if search_v is None else round(search_v if mover == P1 else -search_v, 4)
+            ),
+            "best_q": round(float(res.best_q), 4) if res is not None else None,
             "visits": int(res.visits) if res is not None else 0,
-            "candidates": cands,
+            "candidates": self._candidates(res),
         }
 
     # ---------------- 对外操作 ----------------
@@ -136,9 +150,28 @@ class Game:
                 return {"error": "现在轮到你走"}
             a = self._player.select(b)
             res = getattr(self._player, "last_result", None)
-            self.history.append(self._snapshot(a, b.to_move, res))
             self.board = b.play(a)
+            self.history.append(self._ply_entry(a, b.to_move, res))
             return {}
+
+    def _static_value(self):
+        """对当前局面做一次**静态评估**（只前向一次，不搜索）。
+
+        返回 (value, to_move)；value 是"轮到走棋的一方"的视角。
+        人类落子后调用它，让价值曲线每一手都有点。
+        """
+        b = self.board
+        if b.is_terminal():
+            # 已终局：轮到的一方已经输了；平局为 0
+            return (0.0 if b.winner is None else -1.0), int(b.to_move)
+        ev = getattr(self._player, "evaluator", None)
+        if ev is None:
+            return None, int(b.to_move)
+        legal = [i for i, v in enumerate(b.cells) if v == EMPTY]
+        if not legal:
+            return 0.0, int(b.to_move)
+        _probs, value = ev.evaluate(b.cells, b.to_move, b.last_move, legal)
+        return float(value), int(b.to_move)
 
     def human_move(self, row, col) -> Dict[str, Any]:
         with self.lock:
@@ -159,18 +192,8 @@ class Game:
             a = r * self.size + c
             if b.cells[a] != EMPTY:
                 return {"error": "该位置已有棋子"}
-            self.history.append(
-                {
-                    "action": a,
-                    "by": int(hc),
-                    "value": None,
-                    "value_black": None,
-                    "best_q": None,
-                    "visits": 0,
-                    "candidates": [],
-                }
-            )
             self.board = b.play(a)
+            self.history.append(self._ply_entry(a, hc, None))
             # 人走完立刻让 AI 应手（同步，约 1~2 秒）
             if not self.board.is_terminal():
                 return self.ai_step_locked()
@@ -181,8 +204,8 @@ class Game:
         b = self.board
         a = self._player.select(b)
         res = getattr(self._player, "last_result", None)
-        self.history.append(self._snapshot(a, b.to_move, res))
         self.board = b.play(a)
+        self.history.append(self._ply_entry(a, b.to_move, res))
         return {}
 
     def hint(self) -> Dict[str, Any]:
@@ -193,8 +216,21 @@ class Game:
                 return {"error": "对局已结束"}
             a = self._player.select(b)
             res = getattr(self._player, "last_result", None)
-            snap = self._snapshot(a, b.to_move, res)
-            return {"hint": snap}
+            value = float(res.value) if res is not None else 0.0
+            return {
+                "hint": {
+                    "action": int(a),
+                    "by": int(b.to_move),
+                    "value": round(value, 4),
+                    "value_black": round(value if b.to_move == P1 else -value, 4),
+                    "search_black": round(
+                        value if b.to_move == P1 else -value, 4
+                    ),
+                    "best_q": round(float(res.best_q), 4) if res is not None else 0.0,
+                    "visits": int(res.visits) if res is not None else 0,
+                    "candidates": self._candidates(res),
+                }
+            }
 
     def undo(self) -> Dict[str, Any]:
         with self.lock:
@@ -297,6 +333,9 @@ PAGE = r"""<!DOCTYPE html>
       <div class="vnum mono" id="v-now">—</div>
       <div class="sub" id="v-txt">等 AI 走一步后显示</div>
       <canvas id="chart" width="352" height="196" style="margin-top:10px"></canvas>
+      <div class="sub" style="margin-top:6px;font-size:11px">
+        曲线 = 网络对每一步之后的静态评估（不搜索）；AI 一行的「本手搜索」是它搜索时的判断
+      </div>
     </div>
 
     <div class="panel">
@@ -466,8 +505,14 @@ function render(){
   const last = st.last;
   if(last && last.value_black !== null){
     $("v-now").textContent = (last.value_black>=0?"+":"") + last.value_black.toFixed(2);
-    $("v-txt").textContent = "黑方 " + (last.value_black>=0?"占优":"劣势") +
-      " · 模拟 " + last.visits + " 次 · q=" + last.best_q.toFixed(2);
+    let tip = "黑方 " + (last.value_black>=0?"占优":"劣势");
+    if(last.visits > 0){
+      tip += " · 模拟 " + last.visits + " 次";
+      if(last.search_black !== null && last.search_black !== undefined){
+        tip += " · 本手搜索 " + (last.search_black>=0?"+":"") + last.search_black.toFixed(2);
+      }
+    }
+    $("v-txt").textContent = tip;
   }
   const human = st.human;
   let msg;

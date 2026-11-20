@@ -76,7 +76,20 @@ class WebCase(unittest.TestCase):
         self.assertEqual(st["history"][0]["by"], 1)
         self.assertEqual(st["history"][1]["by"], 2)
         self.assertEqual(st["history"][0]["action"], 4 * 9 + 4)
+        self.assertIsNotNone(st["history"][0]["value_black"])  # 人类这一手也要有评估
         self.assertIsNotNone(st["history"][1]["value_black"])
+
+    def test_every_ply_has_value(self):
+        """价值曲线要每手都有点：人类落子走静态评估，AI 落子走搜索评估。"""
+        for r, c in [(4, 4), (2, 2), (6, 6)]:
+            status, st = self.post("/api/move", {"row": r, "col": c})
+            if status != 200:
+                break
+        self.assertTrue(len(st["history"]) >= 2)
+        for h in st["history"]:
+            self.assertIsNotNone(h["value_black"], msg=f"第 {h['action']} 手缺评估")
+            self.assertGreaterEqual(h["value_black"], -1.0)
+            self.assertLessEqual(h["value_black"], 1.0)
 
     def test_move_rejects_occupied(self):
         self.post("/api/move", {"row": 4, "col": 4})
