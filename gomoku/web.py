@@ -253,6 +253,7 @@ PAGE = r"""<!DOCTYPE html>
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
   .board-wrap{flex:0 0 auto}
   canvas{display:block;border-radius:8px;cursor:pointer}
+  #board{background:#e8d6b4;box-shadow:0 0 0 1px #b99a6d, 0 8px 22px rgba(0,0,0,.5)}
   .bar{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
   button{background:#252a36;color:var(--fg);border:1px solid var(--line);
          border-radius:8px;padding:7px 13px;cursor:pointer;font-size:13px}
@@ -351,56 +352,50 @@ function draw(){
   if(!st) return;
   const S = st.size;
   CELL = (W - PAD*2) / (S-1);
-  bx.fillStyle = "#1b1e27"; bx.fillRect(0,0,W,W);
-  bx.strokeStyle = "#3a4052"; bx.lineWidth = 1;
+  bx.fillStyle = "#e8d6b4"; bx.fillRect(0,0,W,W);
+  bx.strokeStyle = "#b08a5a"; bx.lineWidth = 1;
   for(let i=0;i<S;i++){
     const p = PAD + i*CELL;
     bx.beginPath(); bx.moveTo(PAD,p); bx.lineTo(PAD+(S-1)*CELL,p); bx.stroke();
     bx.beginPath(); bx.moveTo(p,PAD); bx.lineTo(p,PAD+(S-1)*CELL); bx.stroke();
   }
   // 坐标
-  bx.fillStyle = "#5d6579"; bx.font = "10px ui-monospace,monospace";
+  bx.fillStyle = "#8a6f4a"; bx.font = "10px ui-monospace,monospace";
   bx.textAlign = "center"; bx.textBaseline = "middle";
   for(let i=0;i<S;i++){
     bx.fillText(i, PAD + i*CELL, PAD - 13);
     bx.fillText(i, PAD - 14, PAD + i*CELL);
   }
-  // 热力图：候选点的访问占比
-  const cands = (st.last && st.last.candidates) || [];
-  if(cands.length){
-    const tot = cands.reduce((s,c)=>s+c.n,0) || 1;
-    for(const c of cands){
-      const r = Math.floor(c.a/S), cc = c.a%S;
-      const x = PAD + cc*CELL, y = PAD + r*CELL;
-      const ratio = c.n/tot;
-      bx.fillStyle = "rgba(110,168,254," + (0.10 + 0.55*Math.min(1,ratio*1.6)) + ")";
-      bx.beginPath();
-      bx.arc(x, y, CELL*0.44, 0, Math.PI*2);
-      bx.fill();
-    }
-  }
   for(const h of hintCells){
     const r = Math.floor(h/S), cc = h%S;
-    bx.strokeStyle = "#f0a35e"; bx.lineWidth = 2;
+    bx.strokeStyle = "#c2410c"; bx.lineWidth = 2.5;
     bx.beginPath(); bx.moveTo(PAD+cc*CELL-6, PAD+r*CELL-6); bx.lineTo(PAD+cc*CELL+6, PAD+r*CELL+6);
     bx.moveTo(PAD+cc*CELL+6, PAD+r*CELL-6); bx.lineTo(PAD+cc*CELL-6, PAD+r*CELL+6); bx.stroke();
   }
-  // 棋子
+  // 棋子：黑子近黑、白子近白，都加深色描边，保证在木色底上都清楚
   for(let i=0;i<st.cells.length;i++){
     const v = st.cells[i]; if(!v) continue;
     const r = Math.floor(i/S), c = i%S;
     const x = PAD + c*CELL, y = PAD + r*CELL;
-    bx.beginPath(); bx.arc(x, y, CELL*0.40, 0, Math.PI*2);
-    bx.fillStyle = v===1 ? "#e9ecf3" : "#454d61";
+    const R = CELL*0.42;
+    bx.beginPath(); bx.arc(x, y+1.2, R, 0, Math.PI*2);
+    bx.fillStyle = "rgba(60,40,15,.28)"; bx.fill();          // 落子阴影
+    bx.beginPath(); bx.arc(x, y, R, 0, Math.PI*2);
+    bx.fillStyle = v===1 ? "#141518" : "#fbfaf6"; bx.fill();
+    bx.strokeStyle = v===1 ? "#000000" : "#8a8070";
+    bx.lineWidth = 1.2; bx.stroke();
+    bx.beginPath();
+    bx.arc(x - R*0.30, y - R*0.30, R*0.34, 0, Math.PI*2);
+    bx.fillStyle = v===1 ? "rgba(255,255,255,.16)" : "rgba(0,0,0,.055)";
     bx.fill();
-    bx.strokeStyle = v===1 ? "#9aa4bb" : "#2a3040"; bx.lineWidth = 1; bx.stroke();
   }
-  // 最后一手标记
+  // 最后一手：中心红点（黑白子上都清晰）
   if(st.history && st.history.length){
     const a = st.history[st.history.length-1].action;
     const [x,y] = xy(a);
-    bx.strokeStyle = "#6ea8fe"; bx.lineWidth = 2.5;
-    bx.beginPath(); bx.arc(x, y, CELL*0.46, 0, Math.PI*2); bx.stroke();
+    bx.beginPath(); bx.arc(x, y, CELL*0.17, 0, Math.PI*2);
+    bx.fillStyle = "#e23b3b"; bx.fill();
+    bx.strokeStyle = "rgba(255,255,255,.85)"; bx.lineWidth = 1; bx.stroke();
   }
 }
 
