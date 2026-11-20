@@ -1,4 +1,4 @@
-"""命令行入口：play / arena / train / doctor。"""
+"""命令行入口：play / arena / web / train / doctor。"""
 
 from __future__ import annotations
 
@@ -186,6 +186,52 @@ def cmd_arena(args, cfg):
 
 
 # ============================================================
+# 浏览器界面
+# ============================================================
+def cmd_web(args, cfg):
+    from pathlib import Path
+
+    from .web import Game, serve
+
+    size = _board_size(args, cfg)
+    device = resolve_device(device_spec(cfg.get("device", "auto"), args.device))
+    configure_threads(cfg)
+
+    algo = args.algo
+    model = args.model
+    if algo is None:
+        algo = "net" if model else "heuristic"
+    if algo == "net":
+        if not model:
+            for cand in ("models/latest.pt", "models/best.pt"):
+                if Path(cand).is_file():
+                    model = cand
+                    break
+        if not model or not Path(model).is_file():
+            print(
+                "错误：没找到模型文件。用 --model 指定，或加 --algo heuristic 走启发式。",
+                file=sys.stderr,
+            )
+            return 1
+        spec = f"net:{model}"
+    else:
+        spec = "heuristic"
+
+    sims = int(args.sims or cfg.get("mcts", {}).get("sims_play", 400))
+    game = Game(
+        size=size,
+        human=args.human,
+        sims=sims,
+        spec=spec,
+        cfg=cfg,
+        device=device,
+        seed=int(cfg.get("seed", 0)),
+    )
+    serve(game, host=args.host, port=int(args.port))
+    return 0
+
+
+# ============================================================
 # 训练
 # ============================================================
 def cmd_train(args, cfg):
@@ -255,6 +301,22 @@ def build_parser():
     ar.add_argument("--device", default=None)
     ar.add_argument("--seed", type=int, default=None)
     ar.set_defaults(func=cmd_arena)
+
+    wb = sub.add_parser("web", help="浏览器界面（下棋 + 可视化搜索）")
+    wb.add_argument("--model", default=None, help="模型路径；省略则自动找 latest.pt")
+    wb.add_argument("--algo", choices=["net", "heuristic"], default=None)
+    wb.add_argument("--sims", type=int, default=None, help="AI 每步模拟次数")
+    wb.add_argument("--port", type=int, default=8000)
+    wb.add_argument("--host", default="127.0.0.1")
+    wb.add_argument(
+        "--human",
+        choices=["p1", "p2", "none"],
+        default="p1",
+        help="你执黑(p1)/白(p2)；none = AI 互下",
+    )
+    wb.add_argument("--board-size", type=int, default=None)
+    wb.add_argument("--device", default=None)
+    wb.set_defaults(func=cmd_web)
 
     tr = sub.add_parser("train", help="自对弈训练")
     tr.add_argument("--iterations", type=int, default=None)

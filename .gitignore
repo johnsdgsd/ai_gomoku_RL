@@ -14,3 +14,6 @@ tests/_artifacts/
 # 虚拟环境
 .venv/
 venv/
+
+# 本地保存的历史经验池/模型备份，不入库
+history_memo/

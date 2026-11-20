@@ -45,9 +45,46 @@ $py = "D:\WYJ\Anaconda\Anaconda3\envs\MyRL\python.exe"
 
 # 5) 用训练好的模型对局
 & $py -m gomoku play --algo net --model models/best.pt --human p2 --device cpu
+
+# 6) 浏览器界面（下棋 + 可视化搜索过程）
+& $py -m gomoku web --model models/latest.pt --sims 1000
+#   然后打开 http://127.0.0.1:8000
 ```
 
 > 通过管道/脚本喂输入时不会弹交互提问（`stdin` 不是终端），此时请显式加 `--human p1|p2`。
+
+## 浏览器界面
+
+```powershell
+& $py -m gomoku web --model models/latest.pt --sims 1000
+#   → http://127.0.0.1:8000
+```
+
+**完全独立于训练流程**：只读取指定模型文件，不写任何训练产物，也不影响正在跑的训练。
+不给 `--model` 时会自动找 `models/latest.pt` / `models/best.pt`；加 `--algo heuristic` 则不用模型。
+
+| 参数 | 说明 |
+|---|---|
+| `--model` | 模型路径 |
+| `--algo` | `net` / `heuristic`，省略时按有没有模型自动判断 |
+| `--sims` | AI 每步模拟次数，默认取配置 `mcts.sims_play` |
+| `--human` | `p1`（你执黑）/ `p2`（你执白）/ `none`（AI 互下） |
+| `--port` / `--host` | 监听地址，默认 `127.0.0.1:8000` |
+
+界面上能看到的不只是棋盘：
+
+| 区域 | 内容 |
+|---|---|
+| 棋盘 | 点击落子；**蓝色热力圈** = MCTS 在该点的访问占比，越亮越重视 |
+| 局面评估 | 网络对该局的判断（黑方视角，−1 ~ +1）+ **整盘价值曲线** |
+| MCTS 候选 | 前 8 个候选点的访问次数、占比、q 值 |
+| 按钮 | 新局 / 悔棋 / 提示（只算不落子）/ AI 走一步 / 导出棋谱 |
+
+「导出棋谱」会给出每手坐标、黑白标记、该手前的评估值，以及一行可以直接复制的坐标串——
+排查「它哪一手开始下崩」时比看终端方便得多。
+
+> 每次 AI 落子是同步计算的（1000 次模拟约 1~2 秒），页面会显示「AI 思考中…」。
+> AI 互下模式不是自动播放，而是每次点「AI 走一步」前进一手，方便逐手观察热力图。
 
 ## 续训
 
@@ -214,7 +251,8 @@ gomoku/
   network.py      策略/价值网络与存档
   train.py        训练主循环（评测、best 模型、续训、CSV 日志）
   device.py       配置加载 + 设备解析 + doctor
-  cli.py          play / arena / train / doctor
+  web.py          浏览器界面（HTTP 服务 + 单页前端 + 棋谱导出）
+  cli.py          play / arena / web / train / doctor
 configs/default.yaml     # 唯一配置：board.size、device、mcts、train 等全部参数
 tests/             unittest（零额外依赖）
 ```
@@ -226,7 +264,8 @@ tests/             unittest（零额外依赖）
 ```
 
 覆盖：规则与边界（四方向五连、跨行不回绕、平局、悔棋）、编码与对称往返、
-MCTS 必胜必堵与回溯符号、网络形状/梯度/存读档、回放池 z 回填与增广对齐、自对弈与训练冒烟，
+MCTS 必胜必堵与回溯符号、网络形状/梯度/存读档、回放池 z 回填与增广对齐、自对弈与训练冒烟、
+回放池 npz 存取与续训恢复、Web 接口（新局/落子/悔棋/提示/导出/404），
 以及 **9×9 / 15×15 双尺寸**（编码形状、对称置换、网络输出、MCTS 战术、回放池、arena/自对弈、配置读取）。
 
 ## 已知限制
