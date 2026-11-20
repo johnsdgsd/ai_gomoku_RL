@@ -260,7 +260,7 @@ PAGE = r"""<!DOCTYPE html>
   button:hover{background:#2e3444}
   button:disabled{opacity:.45;cursor:not-allowed}
   button.primary{background:var(--accent);color:#0d1017;border-color:var(--accent);font-weight:600}
-  .right{flex:0 0 340px;display:flex;flex-direction:column;gap:14px}
+  .right{flex:0 0 384px;display:flex;flex-direction:column;gap:14px}
   h3{margin:0 0 10px;font-size:13px;font-weight:600;color:var(--dim);letter-spacing:.4px}
   .vnum{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}
   .sub{color:var(--dim);font-size:12px}
@@ -296,7 +296,7 @@ PAGE = r"""<!DOCTYPE html>
       <h3>局面评估（黑方视角）</h3>
       <div class="vnum mono" id="v-now">—</div>
       <div class="sub" id="v-txt">等 AI 走一步后显示</div>
-      <canvas id="chart" width="312" height="110" style="margin-top:10px"></canvas>
+      <canvas id="chart" width="352" height="196" style="margin-top:10px"></canvas>
     </div>
 
     <div class="panel">
@@ -342,7 +342,7 @@ function layout(){
   W = Math.min(620, Math.max(320, window.innerWidth - 60));
   [W] = fitCanvas(boardCv, W, W);
   PAD = 26; CELL = (W - PAD*2) / 14;
-  fitCanvas(chartCv, 312, 110);
+  fitCanvas(chartCv, 352, 196);
 }
 
 function xy(idx){ const S = st.size, r = Math.floor(idx/S), c = idx%S;
@@ -400,23 +400,46 @@ function draw(){
 }
 
 function drawChart(){
-  fitCanvas(chartCv, 312, 110);
-  cx.clearRect(0,0,312,110);
+  const CW = 352, CH = 196, L = 28, R = 10, T = 12, B = 22;
+  fitCanvas(chartCv, CW, CH);
+  cx.clearRect(0,0,CW,CH);
+  const pw = CW - L - R, ph = CH - T - B;
+  const vy = v => T + (1 - (v+1)/2) * ph;
+
+  cx.font = "10px ui-monospace,monospace";
+  cx.textAlign = "right"; cx.textBaseline = "middle";
+  for(const v of [1, 0.5, 0, -0.5, -1]){
+    const y = vy(v);
+    cx.strokeStyle = (v === 0) ? "#3a4052" : "#242935";
+    cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(L, y); cx.lineTo(CW-R, y); cx.stroke();
+    cx.fillStyle = "#7b8398";
+    cx.fillText(v > 0 ? "+" + v : String(v), L - 6, y);
+  }
+
   const pts = (st.history||[]).filter(h => h.value_black !== null);
-  cx.strokeStyle = "#2b2f3c"; cx.lineWidth = 1;
-  cx.beginPath(); cx.moveTo(0,55); cx.lineTo(312,55); cx.stroke();
-  if(pts.length < 2) return;
+  if(pts.length === 0) return;
   const n = pts.length;
-  cx.beginPath();
+  const X = i => (n === 1) ? (L + pw/2) : (L + i/(n-1)*pw);
+
+  if(n > 1){
+    cx.beginPath();
+    pts.forEach((p,i)=>{ const x = X(i), y = vy(p.value_black);
+                         i ? cx.lineTo(x,y) : cx.moveTo(x,y); });
+    cx.strokeStyle = "rgba(110,168,254,.85)"; cx.lineWidth = 2; cx.stroke();
+  }
   pts.forEach((p,i)=>{
-    const x = n>1 ? (i/(n-1))*306 + 3 : 3;
-    const y = 55 - p.value_black*45;
-    i ? cx.lineTo(x,y) : cx.moveTo(x,y);
+    cx.beginPath(); cx.arc(X(i), vy(p.value_black), 2.4, 0, Math.PI*2);
+    cx.fillStyle = "#6ea8fe"; cx.fill();
   });
-  cx.strokeStyle = "#6ea8fe"; cx.lineWidth = 2; cx.stroke();
-  const lastP = pts[n-1];
-  cx.fillStyle = "#6ea8fe";
-  cx.beginPath(); cx.arc((n>1?306:3)+3, 55 - lastP.value_black*45, 3.5, 0, Math.PI*2); cx.fill();
+  const lp = pts[n-1], lx = X(n-1), ly = vy(lp.value_black);
+  cx.beginPath(); cx.arc(lx, ly, 4.6, 0, Math.PI*2);
+  cx.strokeStyle = "#cfe1ff"; cx.lineWidth = 1.5; cx.stroke();
+
+  cx.textAlign = "left"; cx.fillStyle = "#7b8398";
+  cx.fillText("第 1 手", L, CH - 8);
+  cx.textAlign = "right";
+  cx.fillText("第 " + st.history.length + " 手", CW - R, CH - 8);
 }
 
 function renderCands(){
