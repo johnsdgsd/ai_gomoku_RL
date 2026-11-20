@@ -243,7 +243,7 @@ PAGE = r"""<!DOCTYPE html>
 <title>五子棋 AI</title>
 <style>
   :root{
-    --bg:#12141a; --panel:#1b1e27; --line:#2b2f3c; --fg:#e8eaf0; --dim:#8b93a7;
+    --bg:#12141a; --panel:#1b1e27; --line:#2b2f3c; --fg:#eef1f7; --dim:#a7b0c6;
     --accent:#6ea8fe; --x:#e8eaf0; --o:#4a5265; --warn:#f0a35e;
   }
   *{box-sizing:border-box}
@@ -400,20 +400,20 @@ function draw(){
 }
 
 function drawChart(){
-  const CW = 352, CH = 196, L = 28, R = 10, T = 12, B = 22;
+  const CW = 352, CH = 196, L = 32, R = 10, T = 12, B = 22;
   fitCanvas(chartCv, CW, CH);
   cx.clearRect(0,0,CW,CH);
   const pw = CW - L - R, ph = CH - T - B;
   const vy = v => T + (1 - (v+1)/2) * ph;
 
-  cx.font = "10px ui-monospace,monospace";
+  cx.font = "11px ui-monospace,monospace";
   cx.textAlign = "right"; cx.textBaseline = "middle";
   for(const v of [1, 0.5, 0, -0.5, -1]){
     const y = vy(v);
-    cx.strokeStyle = (v === 0) ? "#3a4052" : "#242935";
+    cx.strokeStyle = (v === 0) ? "#525b70" : "#394253";
     cx.lineWidth = 1;
     cx.beginPath(); cx.moveTo(L, y); cx.lineTo(CW-R, y); cx.stroke();
-    cx.fillStyle = "#7b8398";
+    cx.fillStyle = "#d3dbee";
     cx.fillText(v > 0 ? "+" + v : String(v), L - 6, y);
   }
 
@@ -426,17 +426,18 @@ function drawChart(){
     cx.beginPath();
     pts.forEach((p,i)=>{ const x = X(i), y = vy(p.value_black);
                          i ? cx.lineTo(x,y) : cx.moveTo(x,y); });
-    cx.strokeStyle = "rgba(110,168,254,.85)"; cx.lineWidth = 2; cx.stroke();
+    cx.strokeStyle = "#7fb6ff"; cx.lineWidth = 2.4; cx.stroke();
   }
   pts.forEach((p,i)=>{
-    cx.beginPath(); cx.arc(X(i), vy(p.value_black), 2.4, 0, Math.PI*2);
-    cx.fillStyle = "#6ea8fe"; cx.fill();
+    cx.beginPath(); cx.arc(X(i), vy(p.value_black), 2.8, 0, Math.PI*2);
+    cx.fillStyle = "#9cc6ff"; cx.fill();
   });
   const lp = pts[n-1], lx = X(n-1), ly = vy(lp.value_black);
-  cx.beginPath(); cx.arc(lx, ly, 4.6, 0, Math.PI*2);
-  cx.strokeStyle = "#cfe1ff"; cx.lineWidth = 1.5; cx.stroke();
+  cx.beginPath(); cx.arc(lx, ly, 5.0, 0, Math.PI*2);
+  cx.strokeStyle = "#ffffff"; cx.lineWidth = 1.8; cx.stroke();
 
-  cx.textAlign = "left"; cx.fillStyle = "#7b8398";
+  cx.font = "11px ui-monospace,monospace";
+  cx.textAlign = "left"; cx.fillStyle = "#aab4cb";
   cx.fillText("第 1 手", L, CH - 8);
   cx.textAlign = "right";
   cx.fillText("第 " + st.history.length + " 手", CW - R, CH - 8);
