@@ -180,6 +180,26 @@ class AiVsAiCase(unittest.TestCase):
         status, data = self.post("/api/move", {"row": 4, "col": 4})
         self.assertEqual(status, 400)
 
+    def test_finished_game_reports_winner_and_line(self):
+        """终局要能报出胜方，并给出造成胜利的那一串连子。"""
+        st = None
+        for _ in range(80):
+            self.post("/api/step", {})
+            st = self.game.state()
+            if st["terminal"]:
+                break
+        self.assertTrue(st["terminal"], msg="80 手内没下完，测试数据不足")
+        self.assertIn(st["winner"], (1, 2))
+        self.assertIsNotNone(st["win_line"])
+        line = st["win_line"]
+        self.assertGreaterEqual(len(line), 5)
+        self.assertEqual({st["cells"][a] for a in line}, {st["winner"]})  # 同一颜色
+        rs = [a // st["size"] for a in line]
+        cs = [a % st["size"] for a in line]
+        cols = {len(set(rs)) == 1, len(set(cs)) == 1,
+                max(rs) - min(rs) == max(cs) - min(cs)}
+        self.assertTrue(any(cols), msg="连线不共线")
+
 
 if __name__ == "__main__":
     unittest.main()

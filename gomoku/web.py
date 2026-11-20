@@ -112,14 +112,34 @@ class Game:
         }
 
     # ---------------- 对外操作 ----------------
+    def _win_line(self, cells, last: int, side: int):
+        """返回造成胜利的那一串连子（含 last），用于前端高亮连线。"""
+        size = self.size
+        r0, c0 = divmod(last, size)
+        for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1)):
+            pts = [last]
+            for sgn in (1, -1):
+                r, c = r0 + dr * sgn, c0 + dc * sgn
+                while 0 <= r < size and 0 <= c < size and cells[r * size + c] == side:
+                    pts.append(r * size + c)
+                    r += dr * sgn
+                    c += dc * sgn
+            if len(pts) >= 5:
+                return sorted(pts)
+        return None
+
     def state(self) -> Dict[str, Any]:
         with self.lock:
             b = self.board
+            win_line = None
+            if b.winner is not None and b.last_move is not None:
+                win_line = self._win_line(b.cells, b.last_move, b.winner)
             return {
                 "size": self.size,
                 "cells": [int(x) for x in b.cells],
                 "to_move": int(b.to_move),
                 "winner": None if b.winner is None else int(b.winner),
+                "win_line": win_line,
                 "terminal": bool(b.is_terminal()),
                 "human": self.human,
                 "sims": self.sims,
@@ -305,6 +325,11 @@ PAGE = r"""<!DOCTYPE html>
   .cbar>i{display:block;height:100%;background:var(--accent);border-radius:4px}
   .mono{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
   .status{margin-top:10px;color:var(--dim);font-size:12px;font-variant-numeric:tabular-nums}
+  .banner{margin-bottom:10px;padding:11px 14px;border-radius:10px;
+          font-size:17px;font-weight:700;text-align:center;letter-spacing:.5px}
+  .banner.win{background:#12381f;color:#8ef0b0;border:1px solid #2b6b40}
+  .banner.lose{background:#3d1616;color:#f4a6a6;border:1px solid #7a2e2e}
+  .banner.draw{background:#2b303b;color:#d7dced;border:1px solid #4a5265}
   .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
   select,input{background:#252a36;color:var(--fg);border:1px solid var(--line);
                border-radius:8px;padding:6px 8px;font-size:13px}
@@ -315,6 +340,7 @@ PAGE = r"""<!DOCTYPE html>
 <div class="wrap">
   <div>
     <div class="panel board-wrap">
+      <div class="banner" id="banner" style="display:none"></div>
       <canvas id="board" width="620" height="620"></canvas>
       <div class="bar">
         <button class="primary" id="btn-new">新局</button>
@@ -428,6 +454,20 @@ function draw(){
     bx.fillStyle = v===1 ? "rgba(255,255,255,.16)" : "rgba(0,0,0,.055)";
     bx.fill();
   }
+  // 胜利连线
+  if(st.win_line && st.win_line.length >= 5){
+    const S2 = st.size;
+    for(const a of st.win_line){
+      const r = Math.floor(a/S2), c = a%S2;
+      bx.beginPath(); bx.arc(PAD+c*CELL, PAD+r*CELL, CELL*0.46, 0, Math.PI*2);
+      bx.fillStyle = "rgba(226,59,59,.26)"; bx.fill();
+    }
+    const f = st.win_line[0], l = st.win_line[st.win_line.length-1];
+    bx.beginPath();
+    bx.moveTo(PAD+(f%S2)*CELL, PAD+Math.floor(f/S2)*CELL);
+    bx.lineTo(PAD+(l%S2)*CELL, PAD+Math.floor(l/S2)*CELL);
+    bx.strokeStyle = "#e23b3b"; bx.lineWidth = 3.2; bx.stroke();
+  }
   // 最后一手：中心红点（黑白子上都清晰）
   if(st.history && st.history.length){
     const a = st.history[st.history.length-1].action;
@@ -496,6 +536,20 @@ function renderCands(){
   }).join("");
 }
 
+function resultInfo(){
+  if(!st || !st.terminal) return null;
+  if(st.winner === null) return {cls:"draw", text:"平局"};
+  const blackWon = st.winner === 1;
+  const who = blackWon ? "黑方" : "白方";
+  if(st.human === "p1")
+    return blackWon ? {cls:"win",  text:"🎉 你赢了（黑）"}
+                    : {cls:"lose", text:"AI 获胜（白）"};
+  if(st.human === "p2")
+    return blackWon ? {cls:"lose", text:"AI 获胜（黑）"}
+                    : {cls:"win",  text:"🎉 你赢了（白）"};
+  return {cls:"draw", text: who + "获胜"};
+}
+
 function render(){
   if(!st) return;
   draw(); drawChart(); renderCands();
@@ -515,9 +569,17 @@ function render(){
     $("v-txt").textContent = tip;
   }
   const human = st.human;
+  const ri = resultInfo();
+  const banner = $("banner");
+  if(ri){
+    banner.style.display = "block";
+    banner.className = "banner " + ri.cls;
+    banner.textContent = ri.text;
+  } else {
+    banner.style.display = "none";
+  }
   let msg;
-  if(st.terminal) msg = st.winner === null ? "平局" :
-      (st.winner === 1 ? "黑胜" : "白胜");
+  if(st.terminal) msg = "对局结束";
   else if(human === "none") msg = "AI 互下中 · 点「AI 走一步」";
   else msg = (st.cells.filter(v=>v).length % 2 === 0 ? "轮到黑" : "轮到白");
   $("status").textContent = msg + " · 已下 " + st.history.length + " 手";
